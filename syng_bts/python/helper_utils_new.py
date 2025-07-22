@@ -272,8 +272,9 @@ def plot_new_samples(
         ##########################
         ###### RANDOM SAMPLE #####
         ##########################
-        if len(num_images) == 1:
-            num_images = num_images[0]
+        if isinstance(num_images, int) or len(num_images) == 1:
+            if not isinstance(num_images, int):
+                num_images = num_images[0]
             rand_features = torch.randn(num_images, latent_size)
             if modelname == "CVAE":
                 num_classes = model.num_classes

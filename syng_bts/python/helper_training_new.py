@@ -26,6 +26,7 @@ from tqdm import tqdm
 from tensorboardX import SummaryWriter
 import math
 import torch.optim.lr_scheduler as lr_scheduler
+from torch.utils.data import random_split
 
 
 #%%
@@ -39,6 +40,7 @@ def training_AEs(savepath,             # path to save reconstructed samples
                  modelname,            # choose from "AE","VAE","CVAE"
                  num_epochs,           # maxminum number of training epochs if early stopping does not triggered
                  learning_rate,        # learning rate
+                 val_ratio = 0.2,      # validation ratio
                  pre_model = None,     # load pre-trained model from transfer learning
                  save_model = None,    # save model for transfer learning
                  kl_weight = 1,        # specify for VAE and CVAE
@@ -70,15 +72,20 @@ def training_AEs(savepath,             # path to save reconstructed samples
         model = AE(num_features)
     else: 
         raise ValueError("modelname is not supported by train_AEs funcion.")
-
-
         
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate) 
     if use_scheduler:
         scheduler = lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
     else:
         scheduler = None
-    train_loader = DataLoader(data, batch_size = batch_size, shuffle=True, drop_last=True)
+    # train_loader = DataLoader(data, batch_size = batch_size, shuffle=True, drop_last=True)
+    val_size = int(len(data) * val_ratio)
+    train_size = len(data) - val_size
+    
+    train_dataset, val_dataset = random_split(data, [train_size, val_size])
+    
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size = len(val_dataset), shuffle = False, drop_last = False)
     
     # transfer learning 
     if pre_model is not None:
@@ -89,22 +96,23 @@ def training_AEs(savepath,             # path to save reconstructed samples
     
     if modelname == "CVAE":
         log_dict, best_model = ht.train_CVAE(num_epochs = num_epochs,
-                                          model = model,
-                                          loss_fn = loss_fn,
-                                          optimizer = optimizer, 
-                                          train_loader = train_loader,
-                                          early_stop = early_stop,
-                                          early_stop_num = early_stop_num,
-                                          skip_epoch_stats = True,
-                                          reconstruction_term_weight = 1,
-                                          kl_weight = kl_weight,
-                                          logging_interval = 50,
-                                          save_model = save_model)
-        plot_training_loss(log_dict['train_reconstruction_loss_per_batch'], num_epochs, custom_label = " (reconstruction)")
+                                             model = model,
+                                             loss_fn = loss_fn,
+                                             optimizer = optimizer, 
+                                             train_loader = train_loader,
+                                             val_loader = val_loader,
+                                             early_stop = early_stop,
+                                             early_stop_num = early_stop_num,
+                                             skip_epoch_stats = True,
+                                             reconstruction_term_weight = 1,
+                                             kl_weight = kl_weight,
+                                             logging_interval = 50,
+                                             save_model = save_model)
+        plot_training_loss(log_dict['val_reconstruction_loss_per_batch'], num_epochs, custom_label = " (reconstruction)")
         plt.show()
-        plot_training_loss(log_dict['train_kl_loss_per_batch'], num_epochs, custom_label = " (KL)")
+        plot_training_loss(log_dict['val_kl_loss_per_batch'], num_epochs, custom_label = " (KL)")
         plt.show()
-        plot_training_loss(log_dict['train_combined_loss_per_batch'], num_epochs, custom_label = " (combined)")
+        plot_training_loss(log_dict['val_combined_loss_per_batch'], num_epochs, custom_label = " (combined)")
         plt.show()
         
         if early_stop:

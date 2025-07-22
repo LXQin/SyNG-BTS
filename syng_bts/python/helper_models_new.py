@@ -128,15 +128,18 @@ class CVAE(nn.Module):
             nn.ReLU(True)
         )
 
-    def reparameterize(self, z_mu, z_log_var):
-        eps = torch.randn_like(z_mu)
-        z = z_mu + eps * torch.exp(z_log_var/2.) 
-        return z
+    def reparameterize(self, z_mu, z_log_var, deterministic=False):
+        if deterministic:
+            return z_mu
+        else:
+            eps = torch.randn_like(z_mu)
+            z = z_mu + eps * torch.exp(z_log_var / 2.)
+            return z
 
-    def encoding_fn(self, x, y):
+    def encoding_fn(self, x, y, deterministic=False):
         x = self.encoder(torch.cat((x,y),dim=1))
         z_mean, z_log_var = self.z_mean(x), self.z_log_var(x)
-        encoded = self.reparameterize(z_mean, z_log_var)
+        encoded = self.reparameterize(z_mean, z_log_var, deterministic)
         return z_mean, z_log_var, encoded
 
     def decoding_fn(self, encoded, y):
@@ -144,8 +147,8 @@ class CVAE(nn.Module):
         decoded = self.decoder(encoded)
         return decoded
 
-    def forward(self, x, y):
-        z_mean, z_log_var, encoded = self.encoding_fn(x, y)
+    def forward(self, x, y, deterministic=False):
+        z_mean, z_log_var, encoded = self.encoding_fn(x, y, deterministic)
         decoded = self.decoding_fn(encoded, y)
         return encoded, z_mean, z_log_var, decoded
 

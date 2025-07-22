@@ -569,26 +569,6 @@ def ApplyExperiment(
     else:
         groups = None
 
-    # valdata = None
-    # valgroups = None
-    # if validation_rate is not None and 0 <= validation_rate < 1:
-    #     val_size = int(n_samples * validation_rate)
-    #     train_size = n_samples - val_size
-
-    #     generator = torch.Generator().manual_seed(0)
-    #     oridata, valdata = torch.utils.data.random_split(oridata, [train_size, val_size], generator=generator)
-
-    #     if groups is not None:
-    #         groups_tensor = torch.tensor(groups.values)
-    #         origroups, valgroups = torch.utils.data.random_split(groups_tensor, [train_size, val_size], generator=generator)
-        # else:
-        #     origroups = valgroups = None
-    # else:
-        # train_data = oridata
-        # val_data = None
-        # train_groups = groups
-        # val_groups = None
-
     orilabels, oriblurlabels = create_labels(n_samples=n_samples, groups=groups)
     print("1. Read data, path is " + read_path)
 
@@ -767,8 +747,10 @@ def ApplyExperiment(
         print("VAEs model training finished.")
         log_pd = pd.DataFrame(
             {
-                "kl": log_dict["train_kl_loss_per_batch"],
-                "recons": log_dict["train_reconstruction_loss_per_batch"],
+                "kl": log_dict["val_kl_loss_per_batch"],
+                "recons": log_dict["val_reconstruction_loss_per_batch"],
+                "comb": log_dict['val_combined_loss_per_batch'],
+                "param-batch": log_dict['latent_statistics_per_batch']
             }
         )
         # create directory if not exists

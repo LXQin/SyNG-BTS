@@ -17,6 +17,7 @@ import scipy as sp
 import scipy.linalg
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import defaultdict
 
 
 #%%
@@ -38,6 +39,40 @@ def WMSE(output, target, reduction = "none"):
     weights = 1/(torch.mean(target,0)+1)
     loss = weights*(output - target)**2
     return loss
+
+def calculate_latent_satistics(model, train_loader):
+    model.eval()
+    latent_means = defaultdict(list)
+    latent_vars = defaultdict(list)
+
+    with torch.no_grad():
+        for features, lab in train_loader:
+            if lab.dim() == 1:
+                lab = lab.unsqueeze(1)
+            lab = lab.float()
+
+            _, z_mean, z_log_var, _ = model(features, lab, deterministic = True)
+            z_var = torch.exp(z_log_var)
+
+            for label_value in torch.unique(lab):
+                mask = (lab[:, 0] == label_value)
+                if mask.sum() > 0:
+                    latent_means[label_value.item()].append(z_mean[mask])
+                    latent_vars[label_value.item()].append(z_var[mask])
+
+    epoch_latent_stats = {}
+    for label_value in latent_means.keys():
+        means_cat = torch.cat(latent_means[label_value], dim=0)
+        vars_cat = torch.cat(latent_vars[label_value], dim=0)
+
+        mu_y = means_cat.mean(dim=0)
+        sigma_y = vars_cat.mean(dim=0).sqrt()
+
+        epoch_latent_stats[label_value] = {
+            "mu": mu_y,
+            "sigma": sigma_y
+        }
+    return epoch_latent_stats
 
 #%%
 def train_AE(num_epochs, 
@@ -140,7 +175,9 @@ def train_VAE(num_epochs,
     log_dict = {'train_combined_loss_per_batch': [],
                 'train_combined_loss_per_epoch': [],
                 'train_reconstruction_loss_per_batch': [],
-                'train_kl_loss_per_batch': []}
+                'train_kl_loss_per_batch': [],
+                'latent_statistics_per_batch': []  # 新增
+               }
 
     if loss_fn == "MSE":
         loss_fn = F.mse_loss
@@ -158,7 +195,7 @@ def train_VAE(num_epochs,
         
         epoch_loss = []
         model.train()
-        for batch_idx, (features,_) in enumerate(train_loader):
+        for batch_idx, (features, lab) in enumerate(train_loader):
             # FORWARD AND BACK PROP
             encoded, z_mean, z_log_var, decoded = model(features)
                 
@@ -191,7 +228,7 @@ def train_VAE(num_epochs,
             log_dict['train_combined_loss_per_batch'].append(loss.item())
             log_dict['train_reconstruction_loss_per_batch'].append(pixelwise.item())
             log_dict['train_kl_loss_per_batch'].append(kl_div.item())
-                
+            log_dict['latent_statistics_per_batch'].append({})
                 
             print('Epoch: %03d/%03d | Batch %04d/%04d | Loss: %.4f'
                       % (epoch+1, num_epochs, batch_idx,
@@ -210,6 +247,14 @@ def train_VAE(num_epochs,
                 print('***Epoch: %03d/%03d | Loss: %.3f' % (
                           epoch+1, num_epochs, train_loss))
                 log_dict['train_combined_loss_per_epoch'].append(train_loss.item())
+
+        # ---------- 新增：统计 latent 分布 ----------
+
+        # epoch_latent_stats = calculate_latent_satistics(model, train_loader)
+        # log_dict['latent_statistics_per_batch'].pop()
+        # log_dict['latent_statistics_per_batch'].append(epoch_latent_stats)
+
+        # ---------- 继续训练流程 ----------
         
         train_loss = sum(epoch_loss) / len(epoch_loss)
         if train_loss < best_loss:
@@ -238,6 +283,7 @@ def train_CVAE(num_epochs,
                model, 
                optimizer, 
                train_loader, 
+               val_loader,
                early_stop,
                early_stop_num,
                loss_fn = "MSE",
@@ -247,32 +293,42 @@ def train_CVAE(num_epochs,
                kl_weight = 1,
                save_model = None):
     
-    log_dict = {'train_combined_loss_per_batch': [],
-                'train_combined_loss_per_epoch': [],
+    log_dict = {'train_combined_loss_per_epoch': [],
+                'train_combined_loss_per_batch': [],
                 'train_reconstruction_loss_per_batch': [],
-                'train_kl_loss_per_batch': []}
+                'train_kl_loss_per_batch': [],
+                'val_combined_loss_per_batch': [],
+                'val_reconstruction_loss_per_batch': [],
+                'val_kl_loss_per_batch': [],
+                'latent_statistics_per_batch': [],  # 新增
+               }
 
     if loss_fn == "MSE":
         loss_fn = F.mse_loss
     elif loss_fn == "WMSE":
         loss_fn = WMSE
-        
 
     start_time = time.time()
     best_loss = float('inf')
     best_epoch = 0
     best_model = model
+
+    val_features, val_labels = next(iter(val_loader))
+    if val_labels.dim() == 1:
+        val_labels = val_labels.unsqueeze(1)
+    val_labels = val_labels.float()
+    
     for epoch in range(num_epochs):
-        epoch_loss = []
-        model.train()
+        epoch_train_loss = []
+        epoch_val_loss = []
         for batch_idx, (features, lab) in enumerate(train_loader):
+            model.train()
             if lab.dim() == 1: # label (dim = 1)
                 lab = lab.unsqueeze(1)
             lab = lab.float()
 
                 # FORWARD AND BACK PROP
             encoded, z_mean, z_log_var, decoded = model(features,lab)
-            
                 # total loss = reconstruction loss + KL divergence
                 #kl_divergence = (0.5 * (z_mean**2 + 
                 #                        torch.exp(z_log_var) - z_log_var - 1)).sum()
@@ -288,44 +344,81 @@ def train_CVAE(num_epochs,
             pixelwise = pixelwise.view(batchsize, -1).sum(axis=1) # sum over pixels
             pixelwise = pixelwise.mean() # average over batch dimension
             
-            loss = reconstruction_term_weight*pixelwise + kl_weight*kl_div
-            epoch_loss.append(loss.item())
+            train_loss = reconstruction_term_weight*pixelwise + kl_weight*kl_div
+            epoch_train_loss.append(train_loss.item())
 
             optimizer.zero_grad()
 
-            loss.backward()
+            train_loss.backward()
 
             # UPDATE MODEL PARAMETERS
             optimizer.step()
 
             # LOGGING
-            log_dict['train_combined_loss_per_batch'].append(loss.item())
+            log_dict['train_combined_loss_per_batch'].append(train_loss.item())
             log_dict['train_reconstruction_loss_per_batch'].append(pixelwise.item())
             log_dict['train_kl_loss_per_batch'].append(kl_div.item())
+
+            # --------- NEW: compute val loss after this batch ----------
+            model.eval()
+            with torch.no_grad():
+                _, z_mean_val, z_log_var_val, decoded_val = model(val_features, val_labels, deterministic = True)
+                val_pixelwise = loss_fn(decoded_val, val_features, reduction='none')
+                val_pixelwise = val_pixelwise.view(val_features.size(0), -1).sum(axis=1)
+                val_pixelwise = val_pixelwise.mean()
+
+                kl_div_val = -0.5 * torch.sum(1 + z_log_var_val 
+                                                - z_mean_val**2 
+                                                - torch.exp(z_log_var_val),
+                                                axis=1
+                                             )
+                kl_div_val = kl_div_val.mean()
+
+                val_loss = (reconstruction_term_weight * val_pixelwise 
+                                  + kl_weight * kl_div_val)
+
+            epoch_val_loss.append(val_loss.item())
+
+            # LOGGING
+            log_dict['val_combined_loss_per_batch'].append(val_loss.item())
+            log_dict['val_reconstruction_loss_per_batch'].append(val_pixelwise.item())
+            log_dict['val_kl_loss_per_batch'].append(kl_div_val.item())
+
+            log_dict['latent_statistics_per_batch'].append({})
             
-            
-            print('Epoch: %03d/%03d | Batch %04d/%04d | Loss: %.4f'
+            print('Epoch: %03d/%03d | Batch %04d/%04d | Val-Loss: %.4f'
                       % (epoch+1, num_epochs, batch_idx,
-                         len(train_loader), loss))
+                         len(train_loader), val_loss))
 
         if not skip_epoch_stats:
             model.eval()
             
             with torch.set_grad_enabled(False):  # save memory during inference
-                
+                 # Problem for CVAE: compute_epoch_loss_autoencoder() uses model(features), not for CVAE
                  train_loss = compute_epoch_loss_autoencoder(
                         model, train_loader, loss_fn)
                  print('***Epoch: %03d/%03d | Loss: %.3f' % (
                         epoch+1, num_epochs, train_loss))
                  log_dict['train_combined_loss_per_epoch'].append(train_loss.item())
 
-        train_loss = sum(epoch_loss) / len(epoch_loss)
-        if train_loss < best_loss:
-            best_loss = train_loss
+        # ---------- latent parameters ----------
+
+        epoch_latent_stats = calculate_latent_satistics(model, train_loader)
+        log_dict['latent_statistics_per_batch'].pop()
+        log_dict['latent_statistics_per_batch'].append(epoch_latent_stats)
+
+        # ---------- best model / early stop ----------
+        
+        train_loss = sum(epoch_train_loss) / len(epoch_train_loss)
+        val_loss = sum(epoch_val_loss) / len(epoch_val_loss)
+        
+        if val_loss < best_loss:
+            best_loss = val_loss
             best_epoch = epoch
             best_model = copy.deepcopy(model)
             
-        print('Time elapsed: %.2f min' % ((time.time() - start_time)/60))     
+        print('Time elapsed: %.2f min' % ((time.time() - start_time)/60))
+            
         # for early stopping
         if early_stop and (epoch - best_epoch >= early_stop_num):
             print('Training for early stopping stops at epoch '+str(best_epoch) + " with best loss " + str(best_loss))
@@ -333,6 +426,9 @@ def train_CVAE(num_epochs,
             break
     
     print('Total Training Time: %.2f min' % ((time.time() - start_time)/60))
+
+    for key in log_dict:
+        log_dict[key].append(best_epoch)
 
     if save_model is not None:
         torch.save(best_model.state_dict(), save_model)
