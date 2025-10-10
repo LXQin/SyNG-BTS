@@ -41,26 +41,34 @@ def training_AEs(savepath,             # path to save reconstructed samples
                  num_epochs,           # maxminum number of training epochs if early stopping does not triggered
                  learning_rate,        # learning rate
                  val_ratio = 0.2,      # validation ratio
+                 val_k = 1,            # cross validation number
                  pre_model = None,     # load pre-trained model from transfer learning
                  save_model = None,    # save model for transfer learning
                  kl_weight = 1,        # specify for VAE and CVAE
                  early_stop = True,    # whether or not using early stopping rule: best loss does not get improved in the future early_stop_num epochs.
                  early_stop_num = 30,  # stop training if loss does not improve for early_stop_num epochs
+                 cap = False,            # whether capping the new samples
                  loss_fn = "MSE",      # choose from MSE or WMSE, do not use WMSE if you do not know the weights
                  save_recons = False,  # wheter to save the reconstructed data 
                  new_size = None,      # how many new samples you want to generate, for AE there is no new size so use None
                  save_new = False,     # whether to save the newly generated samples
-                 plot = False,
+                 plot = False,         # whether to plot the heatmaps of reconstructed and newly generated samples with the original ones
                 
                  use_scheduler = False,# scheduler parameters
                  step_size = 10,
-                 gamma = 0.5):        # whether to plot the heatmaps of reconstructed and newly generated samples with the original ones
+                 gamma = 0.5):        
         
     set_all_seeds(random_seed)
     num_features = rawdata.shape[1]
     labels_squeezed = rawlabels.squeeze(1).long()  # shape: (n,)
     num_classes = len(torch.unique(labels_squeezed))
     data = TensorDataset(rawdata,rawlabels)
+    if cap:
+        col_max, _ = torch.max(rawdata, dim=0)
+        col_sd = torch.std(rawdata, dim=0, unbiased=True)
+    else:
+        col_max = None
+        col_sd = None
     
     if modelname == "CVAE":
         model = CVAE(num_features,num_classes)
@@ -122,7 +130,7 @@ def training_AEs(savepath,             # path to save reconstructed samples
                 plt.show()
             if save_new:
                 # plot and save new generated data
-                plot_new_samples(model = best_model, savepathnew = savepathnew, latent_size = 32, modelname = "CVAE", num_images = new_size, plot = plot, colnames = colnames)
+                plot_new_samples(model = best_model, savepathnew = savepathnew, latent_size = 32, modelname = "CVAE", num_images = new_size, plot = plot, colnames = colnames, col_max = col_max, col_sd = col_sd)
                 plt.show()
         else:
             if save_recons:
@@ -131,7 +139,7 @@ def training_AEs(savepath,             # path to save reconstructed samples
                 plt.show()
             if save_new:
                 # plot and save new generated data
-                plot_new_samples(model = model, savepathnew = savepathnew, latent_size = 32, modelname = "CVAE", num_images = new_size, plot = plot, colnames = colnames)
+                plot_new_samples(model = model, savepathnew = savepathnew, latent_size = 32, modelname = "CVAE", num_images = new_size, plot = plot, colnames = colnames, col_max = col_max, col_sd = col_sd)
                 plt.show()
     elif modelname=="VAE":
         log_dict, best_model = ht.train_VAE(num_epochs = num_epochs,
@@ -165,10 +173,10 @@ def training_AEs(savepath,             # path to save reconstructed samples
                 plt.show()
             if save_new:
                 # plot and save new generated data
-                plot_new_samples(model = best_model, savepathnew = savepathnew, latent_size = 32, modelname = "VAE", num_images = new_size, plot = plot, colnames = colnames)
+                plot_new_samples(model = best_model, savepathnew = savepathnew, latent_size = 32, modelname = "VAE", num_images = new_size, plot = plot, colnames = colnames, col_max = col_max, col_sd = col_sd)
                 plt.show()
             else:
-                plot_new_samples(model = best_model, savepathnew = None, latent_size = 32, modelname = "VAE", num_images = new_size, plot = plot)
+                plot_new_samples(model = best_model, savepathnew = None, latent_size = 32, modelname = "VAE", num_images = new_size, plot = plot, colnames = colnames, col_max = col_max, col_sd = col_sd)
                 plt.show()
         else:
             
@@ -181,7 +189,7 @@ def training_AEs(savepath,             # path to save reconstructed samples
                 plt.show()
             if save_new:
                 # plot and save new generated data
-                plot_new_samples(model = model, savepathnew = savepathnew, latent_size = 32, modelname = "VAE", num_images = new_size, plot = plot, colnames = colnames)
+                plot_new_samples(model = model, savepathnew = savepathnew, latent_size = 32, modelname = "VAE", num_images = new_size, plot = plot, colnames = colnames, col_max = col_max, col_sd = col_sd)
                 plt.show()
             else:
                 plot_new_samples(model = model, savepathnew = None, latent_size = 32, modelname = "VAE", num_images = new_size, plot = plot)
@@ -627,7 +635,7 @@ def training_flows(savepathnew, rawdata, batch_frac, valid_batch_frac, random_se
         print('\nEpoch: {}'.format(epoch))
 
         global_step, train_loss = train(epoch, global_step, writer)
-
+        print('train finished.')
 
 
         # # With validation version
@@ -661,11 +669,9 @@ def training_flows(savepathnew, rawdata, batch_frac, valid_batch_frac, random_se
             best_train_loss = train_loss
             best_model = copy.deepcopy(model)
 
-
         print(
             'Best validation at epoch {}: Average Log Likelihood in nats: {:.4f}'.
                 format(best_train_epoch, -best_train_loss))
-
     if save_model is not None:
         torch.save(best_model.state_dict(), save_model)
     # plot and save new generated data

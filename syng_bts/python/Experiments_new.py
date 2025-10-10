@@ -492,16 +492,19 @@ def ApplyExperiment(
     batch_frac,
     learning_rate,
     epoch,
-    validation_rate = None, # Control whether separate the dataset in-function
+    val_ratio = 0.2, # Control whether separate the dataset in-function
     early_stop_num=None,
     off_aug=None,
     AE_head_num=2,
     Gaussian_head_num=9,
     pre_model=None,
     save_model=None,
+    cap = False,
+    
     use_scheduler = False,
     step_size = 10,
-    gamma = 0.5
+    gamma = 0.5,
+    random_seed = 123
 ):
     r"""
         This function trains VAE or CVAE, or GAN, WGAN, WGANGP, MAF, GLOW, RealNVP
@@ -628,7 +631,7 @@ def ApplyExperiment(
         model = model + "_transfrom" + re.search(r"from([A-Z]+)_", pre_model).group(1)
 
     # hyperparameters
-    random_seed = 123
+    # random_seed = 123
 
     savepath = path + dataname + "_" + model + "_recons.csv"
     savepathnew = path + dataname + "_" + model + "_generated.csv"
@@ -729,16 +732,19 @@ def ApplyExperiment(
             modelname=modelname,  # choose from "VAE", "AE"
             num_epochs=num_epochs,  # maximum number of epochs if early stop is not triggered
             learning_rate=learning_rate,
+            val_ratio = val_ratio, # validation set ratio
             kl_weight=kl_weight,  # only take effect if model name is VAE, default value is
             early_stop=early_stop,  # whether use early stopping rule
             early_stop_num=early_stop_num,  # stop training if loss does not improve for early_stop_num epochs
             pre_model=pre_model,  # load pre-trained model from transfer learning
             save_model=save_model,  # save model for transfer learning, specify the path if want to save model
+            cap = cap, # whether capping the new samples
             loss_fn="MSE",  # only choose WMSE if you know the weights, ow. choose MSE by default
             save_recons=False,  # whether save reconstructed data, if True, savepath must be provided
             new_size=new_size,  # how many new samples you want to generate
             save_new=True,  # whether save new samples, if True, savepathnew must be provided
             plot=False,
+            
             use_scheduler = use_scheduler,
             step_size = step_size,
             gamma = gamma

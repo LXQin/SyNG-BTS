@@ -108,6 +108,7 @@ class CVAE(nn.Module):
             nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(True)
         )
 

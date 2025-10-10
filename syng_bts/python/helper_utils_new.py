@@ -35,30 +35,24 @@ def create_labels(n_samples, groups=None):
     # create binary labels and blurry labels for training two-group data
     set_all_seeds(10)  # randomness only for blur labels generation.
     if groups is None:
-        labels = torch.zeros([n_samples, 1])
-        blurlabels = labels
-    else:
-        base = groups[0]
-        labels = torch.zeros([n_samples, 1]).to(torch.float32)
-        labels[groups != base, 0] = 1
-        blurlabels = torch.zeros([n_samples, 1]).to(torch.float32)
-        blurlabels[groups != base, 0] = (10 - 9) * torch.rand(sum(groups != base)) + 9
-        blurlabels[groups == base, 0] = (1 - 0) * torch.rand(sum(groups == base)) + 0
-    return labels, blurlabels
-    
-def create_labels_mul(n_samples, groups=None):
-    set_all_seeds(10)
-
-    if groups is None:
         labels = torch.zeros([n_samples, 1], dtype=torch.float32)
         blurlabels = labels.clone()
-        return labels, blurlabels
+    else:
+        groups_cat = groups.astype("category")
+        n_classes = len(groups_cat.cat.categories)
 
-    groups_cat = groups.astype("category")
-    codes = groups_cat.cat.codes
-    group_tensor = torch.from_numpy(codes.copy().values)
-    labels = group_tensor.float().unsqueeze(1) 
-    blurlabels = labels + torch.rand_like(labels)
+        if n_classes == 2:
+            base = groups[0]
+            labels = torch.zeros([n_samples, 1]).to(torch.float32)
+            labels[groups != base, 0] = 1
+            blurlabels = torch.zeros([n_samples, 1]).to(torch.float32)
+            blurlabels[groups != base, 0] = (10 - 9) * torch.rand(sum(groups != base)) + 9
+            blurlabels[groups == base, 0] = (1 - 0) * torch.rand(sum(groups == base)) + 0
+        else:
+            codes = groups_cat.cat.codes
+            group_tensor = torch.from_numpy(codes.copy().values)
+            labels = group_tensor.float().unsqueeze(1) 
+            blurlabels = labels + torch.rand_like(labels)
     return labels, blurlabels
 
 def draw_pilot(dataset, labels, blurlabels, n_pilot, seednum):
@@ -264,10 +258,9 @@ def plot_recons_samples(
 
 
 def plot_new_samples(
-    model, modelname, savepathnew, latent_size, num_images, plot=False, colnames = None
+    model, modelname, savepathnew, latent_size, num_images, plot=False, colnames = None, col_max = None, col_sd = None
 ):
     # plot new samples heatmap and save new samples as .csv file
-
     with torch.no_grad():
         ##########################
         ###### RANDOM SAMPLE #####
@@ -339,6 +332,25 @@ def plot_new_samples(
             elif modelname == "maf":
                 new_images = model.sample(num_images)
 
+        # === Cap ===
+        if (col_max is not None) and (col_sd is not None):
+            device = new_images.device
+            col_max = col_max.to(device)
+            col_sd  = col_sd.to(device)
+
+            # Except for CVAE label col
+            feat_cols = new_images.size(1) - (1 if modelname == "CVAE" else 0)
+            x = new_images[:, :feat_cols]
+
+            thr = col_max[:feat_cols] + col_sd[:feat_cols]                           # 阈值
+            noise = torch.normal(mean=torch.zeros_like(col_sd[:feat_cols]),
+                                 std=0.1 * col_sd[:feat_cols])                       # N(0,0.1*sd)
+            cap_val = col_max[:feat_cols] + noise                                     # cap 值
+
+            mask = x > thr                                                            # 超阈值位置
+            
+            x = torch.where(mask, cap_val.unsqueeze(0).expand_as(x), x)
+            new_images = torch.cat((x, new_images[:, feat_cols:]), dim=1)
         ##########################
         ### VISUALIZATION
         ##########################
@@ -347,7 +359,6 @@ def plot_new_samples(
         if plot:
             sns.heatmap(new_images.detach().numpy(), cmap="YlGnBu")
             plt.show()
-
         if savepathnew is not None:
             if isinstance(savepathnew, Path):
                 path_components = savepathnew.parts
