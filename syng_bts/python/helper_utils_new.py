@@ -193,7 +193,20 @@ def plot_recons_samples(
     labels = torch.zeros(0, dtype=torch.long)
 
     for batch_idx, (features, lab) in enumerate(data_loader):
-        labels_batch = torch.argmax(lab, dim=1)  # shape: (batch_size,)
+        # compatible with two types of labels:
+        # - (N, C) one-hot -> use argmax
+        # - (N, 1) single column/real number 0/1 -> directly squeeze to (N,)
+        if isinstance(lab, torch.Tensor):
+            if lab.dim() == 2:
+                if lab.size(1) > 1:
+                    labels_batch = torch.argmax(lab, dim=1)  # shape: (batch_size,)
+                else:
+                    labels_batch = lab.squeeze(1).long()
+            else:
+                labels_batch = lab.long()
+        else:
+            # revert: convert non-tensor labels to tensor
+            labels_batch = torch.as_tensor(lab).long()
         labels = torch.cat((labels, labels_batch), dim=0)
 
         with torch.no_grad():
