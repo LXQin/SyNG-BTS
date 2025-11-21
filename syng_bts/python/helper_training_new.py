@@ -355,18 +355,23 @@ def training_iter(iter_times,          # how many times to iterative, will get p
                 feed_data_gen, feed_labels = plot_recons_samples(savepath = None, data_loader = feed_loader, model = best_model, n_features = num_features, modelname = "AE", plot = plot)
             else:
                 feed_data_gen, feed_labels = plot_recons_samples(savepath = None, data_loader = feed_loader, model = model, n_features = num_features, modelname = "AE", plot = plot)
+            # add labels to the generated data
+            if feed_labels.dim() == 1:
+                feed_labels = feed_labels.unsqueeze(1).float()
+            feed_labels = torch.cat((feed_labels, feed_labels), dim=0) # repeat the labels for the generated data
             print(feed_data_gen.shape)
             if replace:
                 new_sample_range = range(int(feed_data_gen.shape[0]/2), feed_data_gen.shape[0])
                 num_failures = 0
+                half_n = len(new_sample_range)  # half of the new samples
                 for i_feature in range(feed_data_gen.shape[1]):
-                    if( torch.std(feed_data_gen[new_sample_range,i_feature]) == 0 ) & ( torch.mean(feed_data_gen[new_sample_range,i_feature]) == 0 ):
-                        feed_data_gen[new_sample_range,i_feature] = feed_data[:, i_feature]
+                    if(torch.std(feed_data_gen[new_sample_range, i_feature]) == 0 ) & ( torch.mean(feed_data_gen[new_sample_range,i_feature]) == 0):
+                        # only replace the second half of the new samples with the original data to avoid shape mismatch
+                        feed_data_gen[new_sample_range, i_feature] = feed_data[:half_n, i_feature]
                         num_failures += 1
-                print("replace " + str(num_failures) +" zero features")
+                print("replace " + str(num_failures) + " zero features")
             feed_data = feed_data_gen
             feed_set = TensorDataset(feed_data, feed_labels)
-
 
     elif modelname=="VAE":
         model = VAE(num_features)
@@ -397,16 +402,22 @@ def training_iter(iter_times,          # how many times to iterative, will get p
             if early_stop:
                 feed_data_gen, feed_labels = plot_recons_samples(savepath = None, data_loader = feed_loader, model = best_model, n_features = num_features, modelname = "VAE", plot = plot)     
             else:
-                feed_data_gen, feed_labels = plot_recons_samples(savepath = None, data_loader = feed_loader, model = model, n_features = num_features, modelname = "VAE", plot = plot)     
+                feed_data_gen, feed_labels = plot_recons_samples(savepath = None, data_loader = feed_loader, model = model, n_features = num_features, modelname = "VAE", plot = plot)
+            # add labels to the generated data
+            if feed_labels.dim() == 1:
+                feed_labels = feed_labels.unsqueeze(1).float()
+            feed_labels = torch.cat((feed_labels, feed_labels), dim=0) # repeat the labels for the generated data
             print(feed_data_gen.shape)
             if replace:
                 new_sample_range = range(int(feed_data_gen.shape[0]/2), feed_data_gen.shape[0])
                 num_failures = 0
+                half_n = len(new_sample_range)  # half of the new samples
                 for i_feature in range(feed_data_gen.shape[1]):
                     if( torch.std(feed_data_gen[new_sample_range,i_feature]) == 0 ) & ( torch.mean(feed_data_gen[new_sample_range,i_feature]) == 0 ):
-                        feed_data_gen[new_sample_range,i_feature] = feed_data[:, i_feature]
+                        # only replace the second half of the new samples with the original data to avoid shape mismatch
+                        feed_data_gen[new_sample_range, i_feature] = feed_data[:half_n, i_feature]
                         num_failures += 1
-                print("replace " + str(num_failures) +" zero features")
+                print("replace " + str(num_failures) + " zero features")
             feed_data = feed_data_gen
             feed_set = TensorDataset(feed_data, feed_labels)
     if saveextend:
